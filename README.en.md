@@ -139,6 +139,8 @@ TeslaMate
 
 PostgreSQL is the source of truth for trips, GPS, and energy use. MQTT only helps identify boundaries faster. It does not replace database facts and is not used to infer routes or costs.
 
+The same read-only summaries can be exposed to a local assistant over MCP stdio. Setup, the local token, and redaction rules are documented in Chinese in [只读助手接入](docs/assistant-readonly.md). That entry does not send vehicle commands. Installing it on a Mac does not attach it to a cloud chat; a client that supports MCP stdio must be running on the same Mac and must launch the process.
+
 ## Privacy and security boundaries
 
 - The project runs locally by default. It does not operate a public server or require a separate account system or shared backend.

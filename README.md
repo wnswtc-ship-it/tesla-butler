@@ -138,6 +138,8 @@ TeslaMate
 
 PostgreSQL 是行程、GPS 和能耗的事实来源。MQTT 只帮助更快识别边界，不能替代数据库事实，也不用于推断路线或费用。
 
+同一套只读统计也可以交给本机助手，不必经过飞书。接入方式、令牌和脱敏规则见 [只读助手接入](docs/assistant-readonly.md)。这个入口不控制车辆，默认不返回坐标、VIN 和道路名。它使用 MCP 标准输入输出：软件装在 Mac 上，也不会自动连上某一次云端聊天，必须由一台支持该协议、并且和数据在同一台 Mac 上的客户端来启动。
+
 ## 隐私与安全边界
 
 - 项目默认本地运行，不运营公共服务器，也不要求账号体系或共享后端。
@@ -221,6 +223,7 @@ npm run worker
 ```bash
 npm run status              # 查看本地连接与数据状态
 npm test                    # 不接触真实服务的自动化测试
+npm run assistant           # 本机只读 MCP。先设置 TESLA_BUTLER_ASSISTANT_TOKEN，见 docs/assistant-readonly.md
 npm run test:live           # 只读检查本机 TeslaMate 数据
 npm run test:charging-live  # 只读检查最新充电会话
 npm run test:trip-live      # 只读检查行程聚合

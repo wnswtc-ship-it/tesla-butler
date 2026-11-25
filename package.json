@@ -8,6 +8,8 @@
     "status": "node src/cli.mjs status",
     "menu": "node src/cli.mjs menu",
     "worker": "node src/worker.mjs",
+    "assistant": "node src/assistant-mcp.mjs",
+    "assistant:query": "node src/assistant-cli.mjs",
     "migrate:receipts": "node src/migrate-receipts.mjs",
     "test:live": "node src/verify-live.mjs",
     "test:charging-live": "node src/verify-charging-live.mjs",
