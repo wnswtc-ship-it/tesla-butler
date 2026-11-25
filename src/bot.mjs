@@ -19,7 +19,7 @@ import {
 } from "./cards.mjs";
 import { calculateFuelComparisons, calculateTripElectricCost } from "./comparisons.mjs";
 import { formatDefaultElectricityRate, parseDefaultRateFormValue, parseDefaultRateTextCommand } from "./default-rate.mjs";
-import { getElectricityCostSummary } from "./electricity-cost-service.mjs";
+import { createDrivingReader } from "./driving-read.mjs";
 import { refreshReferenceFuelPrices } from "./fuel-prices.mjs";
 import { renderRoutePreview } from "./map.mjs";
 import { resolveRouteImage } from "./route-image.mjs";
@@ -29,16 +29,11 @@ import {
   getDriveGroup,
   getDriveGroupRoute,
   getLatestTrip,
-  getLatestTripGroup,
   getLatestTripRoute,
-  getPeriodRouteCandidates,
-  getPeriodTrips,
   getRecentChargingProcesses,
-  getTripInsightHistory,
   getVehicleOverview
 } from "./teslamate.mjs";
 import {
-  getReceiptTotals,
   getDefaultRatePromptedAt,
   getPricingSettings,
   getRouteImageCache,
@@ -55,10 +50,16 @@ import {
   setDefaultElectricityRate,
   setRouteImageCacheEntry
 } from "./store.mjs";
-import { selectMainRoute } from "./routes.mjs";
-import { selectTripAdviceForTrip } from "./trip-insights.mjs";
 import { runUserAction } from './action-runtime.mjs';
 import { withQueryDeadline } from './query-runtime.mjs';
+
+const drivingReader = createDrivingReader({
+  log: (message) => {
+    const line = `[${new Date().toISOString()}] ${message}\n`;
+    if (message.includes("code=metrics_unavailable")) process.stderr.write(line);
+    else process.stdout.write(line);
+  }
+});
 
 const textActions = new Map([
   ["菜单", "menu"], ["帮助", "menu"],
@@ -212,46 +213,36 @@ async function uploadCardImage(imagePath) {
 
 async function makePeriodCard(period) {
   refreshReferenceFuelPrices().catch(() => null);
-  const isMonthly = period === "month" || period === "previous_month";
-  const [trips, receipts, routeCandidates] = await Promise.all([
-    getPeriodTrips(period),
-    getReceiptTotals(period),
-    isMonthly ? getPeriodRouteCandidates(period) : Promise.resolve(null)
-  ]);
-  const pricingSummary = await getElectricityCostSummary(trips.drive_ids || []);
-  const tripElectricCost = pricingSummary.cost_cny;
-  const comparisons = calculateFuelComparisons(trips.distance_km, tripElectricCost);
-  let mainRoute;
-  if (isMonthly) {
-    mainRoute = selectMainRoute(routeCandidates);
-    if (mainRoute) {
-      try {
-        const route = await getDriveRoute(mainRoute.representative_drive_id);
-        const cacheKey = `period-v2-${opaqueId(JSON.stringify({
-          period,
-          drive: mainRoute.representative_drive_id,
-          count: mainRoute.trip_count,
-          distance: mainRoute.distance_km
-        }))}`;
-        const image = await resolveRouteImage({
-          cacheKey,
-          route,
-          labels: {
-            start: mainRoute.representative_start_road,
-            end: mainRoute.representative_end_road
-          }
-        }, {
-          readCache: getRouteImageCache,
-          writeCache: setRouteImageCacheEntry,
-          render: renderRoutePreview,
-          upload: uploadCardImage,
-          log: logRouteImage
-        });
-        if (image.status !== "success") throw new Error(`period map ${image.failureStage || "failed"}`);
-        mainRoute.image_key = image.imageKey;
-      } catch {
-        mainRoute = null;
-      }
+  const facts = await drivingReader.periodReport(period);
+  const { trips, receipts, comparisons, tripElectricCost, pricingSummary } = facts;
+  let mainRoute = facts.mainRoute;
+  if (mainRoute) {
+    try {
+      const route = await getDriveRoute(mainRoute.representative_drive_id);
+      const cacheKey = `period-v2-${opaqueId(JSON.stringify({
+        period,
+        drive: mainRoute.representative_drive_id,
+        count: mainRoute.trip_count,
+        distance: mainRoute.distance_km
+      }))}`;
+      const image = await resolveRouteImage({
+        cacheKey,
+        route,
+        labels: {
+          start: mainRoute.representative_start_road,
+          end: mainRoute.representative_end_road
+        }
+      }, {
+        readCache: getRouteImageCache,
+        writeCache: setRouteImageCacheEntry,
+        render: renderRoutePreview,
+        upload: uploadCardImage,
+        log: logRouteImage
+      });
+      if (image.status !== "success") throw new Error(`period map ${image.failureStage || "failed"}`);
+      mainRoute.image_key = image.imageKey;
+    } catch {
+      mainRoute = null;
     }
   }
   return buildPeriodReportCard({ period, trips, receipts, comparisons, tripElectricCost, mainRoute, pricingSummary });
@@ -274,8 +265,7 @@ async function makeDefaultElectricityPriceCard() {
 }
 
 async function makeLatestTripCard() {
-  const trip = await getLatestTripGroup();
-  return makeTripGroupCard(trip);
+  return makeTripGroupCard(await drivingReader.latestTrip());
 }
 
 function logRouteImage(event) {
@@ -289,23 +279,10 @@ function logRouteImage(event) {
   process.stdout.write(`[${new Date().toISOString()}] route_image ${fields.join(" ")}\n`);
 }
 
-async function getTripAdvice(trip) {
-  if (!trip?.segment_ids?.length) return null;
-  try {
-    const advice = selectTripAdviceForTrip(trip, await getTripInsightHistory());
-    process.stdout.write(`[${new Date().toISOString()}] trip_advice code=${advice?.code || "hidden"} baseline_count=${advice?.baseline_count || 0}\n`);
-    return advice;
-  } catch {
-    process.stderr.write(`[${new Date().toISOString()}] trip_advice code=metrics_unavailable baseline_count=0\n`);
-    return null;
-  }
-}
-
-async function makeTripGroupCard(trip) {
-  const [pricingSummary, advice] = await Promise.all([
-    trip?.segment_ids?.length ? getElectricityCostSummary(trip.segment_ids) : Promise.resolve(null),
-    getTripAdvice(trip)
-  ]);
+async function makeTripGroupCard(facts) {
+  const trip = facts?.trip || null;
+  const pricingSummary = facts?.pricingSummary ?? null;
+  const advice = facts?.advice ?? null;
   if (trip) {
     trip.estimated_cost_cny = pricingSummary?.cost_cny ?? null;
     trip.pricing_summary = pricingSummary;
@@ -473,8 +450,8 @@ async function runAction(action, context) {
       return;
     }
     if (action === "vehicle_overview") {
-      const [vehicle, stats] = await Promise.all([getVehicleOverview(), getPeriodTrips("month")]);
-      await deliverCard(context, buildVehicleOverviewCard(vehicle, stats), "overview");
+      const overview = await drivingReader.vehicleOverview();
+      await deliverCard(context, buildVehicleOverviewCard(overview.vehicle, overview.month), "overview");
     }
   } catch (error) {
     status = "failed";
@@ -873,8 +850,8 @@ export async function pushMenuReviewCard(chatId, key = Date.now()) {
 }
 
 export async function pushVehicleOverviewReviewCard(chatId, key = Date.now()) {
-  const [vehicle, stats] = await Promise.all([getVehicleOverview(), getPeriodTrips("month")]);
-  await sendCard(chatId, buildVehicleOverviewCard(vehicle, stats), `${key}:overview-review`);
+  const overview = await drivingReader.vehicleOverview();
+  await sendCard(chatId, buildVehicleOverviewCard(overview.vehicle, overview.month), `${key}:overview-review`);
 }
 
 export async function sendChargingEvent(chatId, event, key = Date.now(), options = {}) {
@@ -883,7 +860,7 @@ export async function sendChargingEvent(chatId, event, key = Date.now(), options
 
 export async function sendCompletedTrip(chatId, event, key = Date.now()) {
   const trip = event.trip || await getDriveGroup(event.segment_ids);
-  await sendCard(chatId, await makeTripGroupCard(trip), `${key}:trip`);
+  await sendCard(chatId, await makeTripGroupCard(await drivingReader.decorateTrip(trip)), `${key}:trip`);
 }
 
 export async function pushApprovedSimulationCards(chatId, key = Date.now()) {
