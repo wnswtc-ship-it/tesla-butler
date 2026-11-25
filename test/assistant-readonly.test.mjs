@@ -197,6 +197,22 @@ test("只有显式要求时才返回模拟道路名，坐标仍然不返回", as
   assert.equal(text.includes("representative_drive_id"), false);
 });
 
+test("没有采集栈时的说明指向 Docker 里的 TeslaMate，不要求另装数据库", async () => {
+  const broken = createAssistantService({
+    collector: "simulated",
+    reader: {
+      collectionStatus: async () => {
+        throw Object.assign(new Error("postgres://secret-dsn"), { code: "DB_PROCESS_FAILED" });
+      }
+    }
+  });
+  const result = await broken.answer({ query: "collection_status" });
+  assert.equal(result.code, "DATA_UNAVAILABLE");
+  assert.match(result.summary_zh, /Docker 里的 TeslaMate/);
+  assert.match(result.summary_zh, /不需要单独安装 PostgreSQL/);
+  assert.doesNotMatch(result.summary_zh, /secret-dsn/);
+});
+
 test("控制指令和敏感字段不会触发读取", async () => {
   let called = false;
   const guarded = createAssistantService({

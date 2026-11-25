@@ -44,7 +44,7 @@ const failureText = {
   UNSUPPORTED_QUERY: "不支持这个查询。可用查询：capabilities、collection_status、latest_trip、period_report、vehicle_overview、charging_summary。",
   INVALID_ARGUMENT: "参数不正确。period 只能是 week、month、previous_week、previous_month；place_detail 只能是 hidden 或 road。",
   DATA_TIMEOUT: "读取本地数据超时。没有向车辆发送指令。",
-  DATA_UNAVAILABLE: "没有读到本地行车数据。请确认本机 TeslaMate 和 PostgreSQL 正在运行。没有向车辆发送指令。"
+  DATA_UNAVAILABLE: "没有读到本地行车数据。请确认 Docker 里的 TeslaMate 数据库容器正在运行。不需要单独安装 PostgreSQL。没有向车辆发送指令。"
 };
 
 export function createAssistantService({ reader, collector = "teslamate" } = {}) {
